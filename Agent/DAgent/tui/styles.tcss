@@ -1,0 +1,78 @@
+Screen {
+    layout: vertical;
+    background: $surface;
+}
+
+Header {
+    background: $primary;
+    color: $text;
+}
+
+#transcript {
+    height: 1fr;
+    padding: 1 2;
+    background: $surface;
+}
+
+.message {
+    width: 100%;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+.user {
+    color: $text;
+    text-style: bold;
+    border-left: thick $accent;
+}
+
+.assistant {
+    color: $text;
+    border-left: thick $success;
+}
+
+.tool {
+    color: $warning;
+    text-style: italic;
+}
+
+.tool-result {
+    color: $text-muted;
+    padding-left: 3;
+}
+
+.error {
+    color: $error;
+    text-style: bold;
+    padding-left: 3;
+}
+
+.system {
+    color: $text-muted;
+}
+
+#status {
+    height: 1;
+    padding: 0 2;
+    background: $panel;
+    color: $text-muted;
+}
+
+#composer {
+    height: auto;
+    padding: 0 2 1 2;
+    background: $panel;
+}
+
+#prompt {
+    width: 1fr;
+}
+
+#send {
+    width: 10;
+    margin-left: 1;
+}
+
+Footer {
+    background: $panel;
+}

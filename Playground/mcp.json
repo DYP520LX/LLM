@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pet-hospital": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8081/mcp"
+    },
+    "anythingllm": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:8082/mcp"
+    }
+  }
+}

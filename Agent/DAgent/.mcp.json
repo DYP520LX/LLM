@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "Bazi-MCP": {
+      "type": "streamable_http",
+      "url": "https://mcp.api-inference.modelscope.net/4a3222faa31a4e/mcp",
+      "timeout": 60
+    },
+    "PetHospitalMCP": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:8081/mcp"
+    },
+    "AnythingLLMMCP": {
+      "type": "streamable_http",
+      "url": "http://127.0.0.1:8082/mcp"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+在现有 chat.py 上增加打字机输出，改动尽量少。
+
+要求：
+- config.ini 增加一项 stream，只写 true 或 false
+- stream 为 false 时，仍然等完整结果后一次性打印
+- stream 为 true 时，请求里的 stream 也是 true
+- 按行读取 SSE，取出每段 content
+- 拿到一段就立刻打印，不换行，并 flush
+- 全部打完后再换一行
+- 不要动画库，不要自己逐字 sleep，不要重构

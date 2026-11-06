@@ -1,0 +1,11 @@
+用 Python 写一个最简单的一次性对话程序，只做这一次问答。
+
+要求：
+- 目录里只放 chat.py 和 config.ini
+- config.ini 记录 base_url、api_key、model
+- chat.py 读取这份配置
+- 启动后让用户输入一句话
+- 用标准库把这句话发给 base_url 下的 /chat/completions
+- 请求里 stream 固定为 false
+- 等完整回复返回后，一次性打印出来
+- 不要类，不要命令行参数，不要历史记录，不要重试，不要日志，不要额外依赖
