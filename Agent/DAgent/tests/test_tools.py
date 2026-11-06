@@ -13,13 +13,14 @@ from core.types import ToolCall
 class ToolTests(unittest.TestCase):
     def test_registry_contains_all_builtin_tools(self) -> None:
         registry = build_registry()
-        self.assertEqual(len(registry), 15)
-        self.assertEqual(len(registry.schemas()), 15)
+        self.assertEqual(len(registry), 16)
+        self.assertEqual(len(registry.schemas()), 16)
         self.assertIn("get_local_time", registry.names())
         self.assertIn("delete_file", registry.names())
         self.assertIn("fetch_web", registry.names())
         self.assertIn("searchweb", registry.names())
         self.assertIn("Runcli", registry.names())
+        self.assertIn("recallContext", registry.names())
 
     def test_time_tool(self) -> None:
         result = time_tools.get_local_time()

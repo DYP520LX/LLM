@@ -57,7 +57,7 @@ class SearchToolTests(unittest.TestCase):
     def test_registry_contains_searchweb(self) -> None:
         registry = build_registry("test-key")
         self.assertIn("searchweb", registry.names())
-        self.assertEqual(len(registry), 15)
+        self.assertEqual(len(registry), 16)
 
     def test_search_formats_summaries_titles_and_urls(self) -> None:
         with mock.patch.object(

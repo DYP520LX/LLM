@@ -11,9 +11,10 @@ DAgent/
 │   ├── agent.py             # Agent 循环：调用 LLM -> 执行工具 -> 再调用 LLM
 │   ├── bootstrap.py         # 依赖组装：配置 -> LLM 客户端 + 工具注册表 -> Agent
 │   ├── config.py            # Settings 与 config.ini 读取
+│   ├── context.py           # 上下文统计、压缩归档与 recallContext 全文检索
 │   ├── errors.py            # 领域异常
-│   ├── events.py            # UI 消费的 AgentEvent（文本、工具、完成、失败）
-│   ├── llm.py               # OpenAI 兼容客户端，支持 Stream / 非 Stream
+│   ├── events.py            # UI 消费的 AgentEvent（文本、工具、完成、失败、上下文用量）
+│   ├── llm.py               # OpenAI 兼容客户端，支持 Stream / 非 Stream 与 Token Usage
 │   ├── skills.py            # Agent Skills 发现与按需加载
 │   ├── mcp_config.py        # 读取当前项目的 .mcp.json
 │   ├── mcp_client.py        # MCP 连接、list_tools 与工具调用转发
@@ -26,6 +27,7 @@ DAgent/
 │       ├── web_tools.py     # fetch_web：curl 下载 + trafilatura 提取正文
 │       ├── search_tools.py  # searchweb：百度千帆搜索 API
 │       ├── skill_tools.py   # loadskill：加载技能；createskill：创建技能
+│       ├── context_tools.py # recallContext：检索历史上下文归档
 │       └── cli_tools.py     # Runcli：执行本地命令行程序
 ├── tui/                     # Textual 表现层
 │   ├── app.py               # 聊天界面、流式渲染、工具状态展示
@@ -59,6 +61,8 @@ for event in agent.run_turn("现在几点了？"):
             ...       # 即将执行工具
         case ToolCallFinished(result):
             ...       # 工具结果
+        case ContextUsageUpdated(used_tokens, window_tokens, percent, ...):
+            ...       # 每次 LLM 响应后的上下文用量
         case TurnCompleted(content):
             ...       # 本轮结束
         case TurnFailed(message):
@@ -102,11 +106,14 @@ python main.py
 python main.py --config D:\path\to\config.ini
 ```
 
-TUI 快捷键：
+TUI 操作：
 
 - `Enter`：发送
+- `/compact`：手动压缩当前会话上下文
 - `Ctrl+L`：清空会话
 - `Ctrl+Q`：退出
+
+界面顶部会持续显示 `上下文：已用 k / 窗口 k · 已占用百分比`。无法从配置获得模型窗口时默认按 `128k` 计算，并标注「默认」。
 
 ## 配置
 
@@ -126,14 +133,16 @@ model = openai
 stream = true
 timeout = 120
 max_tool_rounds = 10
+# context_window = 128000
 
 [search]
 baidu_qianfan_api_key = bce-v3/ALTAK-...
 ```
 
-- `stream = true`：逐段显示模型输出
+- `stream = true`：逐段显示模型输出，并请求 Provider 在最后一个流式块中返回 Token Usage
 - `stream = false`：等完整回复后一次性显示
 - `max_tool_rounds`：单轮对话中允许的最大工具调用轮数
+- `context_window`：可选，模型上下文窗口大小。支持 `128000`、`128k`、`1m` 等写法；不填时按 `128000` 处理，并在 TUI 中标注「默认」
 - `baidu_qianfan_api_key`：百度千帆百度搜索 API Key，供 `searchweb` 工具使用；留空时工具会向 LLM 返回明确的配置错误
 
 ## MCP Client
@@ -206,6 +215,45 @@ stdio 示例：
 
 `requirements.txt` 已包含 `mcp>=1.10,<2`。若环境未安装 MCP SDK，DAgent 仍能启动，MCP 工具会返回明确的安装提示。
 
+## 上下文压缩与历史检索
+
+### 上下文用量监控
+
+- 每次 LLM 返回后，`Agent` 都会检查当前请求的上下文用量，包含 System Prompt、用户消息、对话历史、工具调用消息、工具返回结果以及工具定义 Schema。
+- 优先使用 Provider 返回的 `usage.prompt_tokens / completion_tokens / total_tokens`；流式请求会带上 `stream_options.include_usage`。Provider 没有返回 Usage 时，使用本地估算：中文约 1 Token/字，英文约 4 字符/Token。
+- 每次更新都会产生 `ContextUsageUpdated` 事件，TUI 顶部据此刷新上下文条。
+- 用量达到窗口的 **60%** 时，TUI 显示警告并把提示词输入框切换为 `/compact` 提示；`Agent.run_turn()` 也会拒绝新的普通提示词，直到压缩成功。
+- 上下文窗口来自 `[llm] context_window`；未配置时默认 `128k`，TUI 显示「默认」。
+
+### `/compact` 手动压缩
+
+1. 用户输入 `/compact` 后，Agent 进入专门的压缩状态，普通任务和 Function Calling 工具都会被阻止。
+2. 在当前项目的 `.agents/context/` 下以原子方式写入完整原始上下文：
+   ```text
+   <项目根目录>/.agents/context/20261022-153000.jsonl
+   ```
+   文件名即归档编号；同一秒内重复压缩会自动追加 `-01`、`-02` 后缀。文件按消息顺序逐行保存，一行一个 JSON 对象，保留 `role`、`content`、`tool_calls`、`tool_call_id` 以及工具参数和结果。
+3. 只有归档写入成功后，才向 LLM 发起**唯一一次**摘要请求；请求使用专用压缩 Prompt，`tools=[]`，即使模型返回工具调用也不会执行。
+4. 摘要成功后，保留原有 System Prompt 和工具定义，把历史消息替换为一条带 `【历史上下文压缩摘要】` 前缀的摘要消息，并在末尾追加归档说明：
+   ```text
+   > 此前上下文已于 2026-10-22 15:30:00 完成压缩，原始上下文保存在编号为 20261022-153000 的归档文件中。如需查找历史信息，请使用 recallContext 工具。
+   ```
+5. TUI 会弹出浮动双栏面板：左侧为压缩前原文，右侧为压缩后摘要，两栏均可独立滚动，点击「关闭」按钮返回会话。
+6. 压缩成功后解除输入限制；如果归档、LLM 请求或摘要生成失败，原有上下文保持不变，TUI 报告错误，用户可以再次输入 `/compact` 重试。
+
+压缩目标约为 5,000 Tokens；实际摘要长度由模型根据压缩 Prompt 控制。
+
+### `recallContext` 工具
+
+压缩后的摘要可能省略部分历史细节，LLM 可以调用普通 Function Calling 工具 `recallContext` 重新检索原始归档：
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `text` | 是 | 要查找的关键词或文本内容 |
+| `id` | 否 | 指定归档编号，例如 `20261022-153000`；省略时检索 `.agents/context/` 下所有归档 |
+
+检索使用 Python 本地全文关键词匹配，支持大小写不敏感的多关键词搜索，会同时搜索消息正文、工具调用参数和工具返回结果。结果包含归档编号、所在行号、消息角色和相关片段；默认最多返回 10 条、总长度约 6000 字符，避免再次占满上下文。
+
 ## 内置工具
 
 | 工具 | 说明 |
@@ -227,7 +275,10 @@ stdio 示例：
 | `Runcli` | 以参数列表执行本地 CLI，返回 stdout、stderr 和退出码 |
 | `loadskill` | 按需加载 Agent Skill 的 `SKILL.md` 全文或技能目录内的附件文件 |
 | `createskill` | 根据 `name` 和 `skillContext` 在当前项目的 `.agents/skills/<name>/` 下创建 `SKILL.md`，自动补全 Frontmatter，已存在时拒绝覆盖 |
+| `recallContext` | 在 `.agents/context/` 归档中按关键词检索原始上下文，返回归档编号、行号、角色和片段 |
 | MCP 工具（动态） | 启动时从当前项目 `.mcp.json` 配置的 MCP Server 发现，名称、描述、参数 Schema 和调用方式与本地工具一致 |
+
+不需要技能目录时，内置工具为 16 个；发现技能后会额外注册 `loadskill` 和 `createskill`，共 18 个。MCP 工具按当前项目配置动态追加。
 
 删除目录会拒绝根目录、当前工作目录及其上级目录。删除操作不可恢复，生产使用时建议在工具层增加交互确认或沙箱目录限制。
 
@@ -309,6 +360,8 @@ description: 根据周报模板整理本周工作记录并生成周报。
 - 系统提示还会说明 MCP 工具与本地工具用法相同；MCP 工具描述末尾会标注来源 Server，便于模型区分同名工具。
 - 模型返回空回复时自动追加一次纠正提示并重试；仍然为空则结束本轮并报告失败，避免界面无提示。
 - 流式解析会合并被网关拆成“无名称片段”的工具调用参数，并清理 `<|channel|>` 之类的通道标记，避免合法工具被误判为未知工具。
+- 上下文达到 60% 后，普通提示词会被阻止；`/compact` 是唯一可继续执行的操作。压缩期间 `Agent.compact()` 不接收工具 Schema，也不会执行任何工具调用。
+- 压缩失败不会修改内存中的历史；压缩成功后才替换历史并保留 System Prompt 与工具注册表。
 
 ## 测试
 

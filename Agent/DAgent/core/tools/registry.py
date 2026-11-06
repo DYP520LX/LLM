@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
@@ -35,23 +36,27 @@ class ToolRegistry:
     def __init__(self, tools: Iterable[Tool] = ()) -> None:
         self._tools: dict[str, Tool] = {}
         self._closers: list[Callable[[], None]] = []
+        self._lock = threading.RLock()
         for tool in tools:
             self.register(tool)
 
     def register(self, tool: Tool) -> None:
-        if tool.name in self._tools:
-            raise ValueError(f"工具重复注册：{tool.name}")
-        self._tools[tool.name] = tool
+        with self._lock:
+            if tool.name in self._tools:
+                raise ValueError(f"工具重复注册：{tool.name}")
+            self._tools[tool.name] = tool
 
     def add_closer(self, closer: Callable[[], None]) -> None:
         """Register a cleanup callback (for example an MCP client manager)."""
 
-        self._closers.append(closer)
+        with self._lock:
+            self._closers.append(closer)
 
     def close(self) -> None:
         """Run cleanup callbacks once, newest first, without raising."""
 
-        closers, self._closers = self._closers, []
+        with self._lock:
+            closers, self._closers = self._closers, []
         for closer in reversed(closers):
             try:
                 closer()
@@ -60,16 +65,21 @@ class ToolRegistry:
                 pass
 
     def names(self) -> tuple[str, ...]:
-        return tuple(self._tools)
+        with self._lock:
+            return tuple(self._tools)
 
     def __len__(self) -> int:
-        return len(self._tools)
+        with self._lock:
+            return len(self._tools)
 
     def schemas(self) -> list[dict[str, Any]]:
-        return [tool.schema() for tool in self._tools.values()]
+        with self._lock:
+            tools = list(self._tools.values())
+        return [tool.schema() for tool in tools]
 
     def execute(self, call: ToolCall) -> ToolResult:
-        tool = self._tools.get(call.name)
+        with self._lock:
+            tool = self._tools.get(call.name)
         if tool is None:
             return ToolResult(
                 name=call.name,

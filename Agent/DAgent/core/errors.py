@@ -11,3 +11,7 @@ class ConfigError(DAgentError):
 
 class LLMError(DAgentError):
     """Raised when the LLM request fails or returns an invalid response."""
+
+
+class ContextCompactionError(DAgentError):
+    """Raised when the manual context compression cannot be completed."""

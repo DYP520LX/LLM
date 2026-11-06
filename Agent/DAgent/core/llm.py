@@ -35,11 +35,43 @@ class LLMTextDelta:
 
 
 @dataclass(frozen=True)
+class TokenUsage:
+    """Token counts reported by an OpenAI-compatible provider."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    @classmethod
+    def from_payload(cls, payload: Any) -> "TokenUsage | None":
+        if not isinstance(payload, dict):
+            return None
+
+        def as_int(value: Any) -> int:
+            try:
+                return max(0, int(value or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        prompt = as_int(payload.get("prompt_tokens"))
+        completion = as_int(payload.get("completion_tokens"))
+        total = as_int(payload.get("total_tokens")) or prompt + completion
+        if total <= 0:
+            return None
+        return cls(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+        )
+
+
+@dataclass(frozen=True)
 class LLMTurnComplete:
     """The final result of one LLM request."""
 
     content: str
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: TokenUsage | None = None
 
 
 LLMEvent = LLMTextDelta | LLMTurnComplete
@@ -73,6 +105,10 @@ class OpenAICompatibleClient:
             "messages": list(messages),
             "stream": self._settings.stream,
         }
+        if self._settings.stream:
+            # Ask OpenAI-compatible providers to send token usage in the final
+            # stream chunk.  If they omit it, the agent falls back to estimation.
+            body["stream_options"] = {"include_usage": True}
         if tools:
             body["tools"] = list(tools)
 
@@ -116,11 +152,13 @@ class OpenAICompatibleClient:
         yield LLMTurnComplete(
             content=content,
             tool_calls=self._tool_calls_from_payloads(message.get("tool_calls") or []),
+            usage=TokenUsage.from_payload(payload.get("usage")),
         )
 
     def _consume_stream(self, response: HTTPResponse) -> Iterator[LLMEvent]:
         content_parts: list[str] = []
         builders: dict[int, dict[str, str]] = {}
+        usage: TokenUsage | None = None
 
         for raw_line in response:
             line = raw_line.decode("utf-8", errors="replace").strip()
@@ -140,6 +178,10 @@ class OpenAICompatibleClient:
                 continue
             if chunk.get("error"):
                 raise LLMError(f"LLM 返回错误：{chunk['error']}")
+
+            chunk_usage = TokenUsage.from_payload(chunk.get("usage"))
+            if chunk_usage is not None:
+                usage = chunk_usage
 
             choices = chunk.get("choices") or []
             if not choices:
@@ -174,7 +216,11 @@ class OpenAICompatibleClient:
             )
             for builder in self._merge_orphan_fragments(builders)
         ]
-        yield LLMTurnComplete(content="".join(content_parts), tool_calls=tool_calls)
+        yield LLMTurnComplete(
+            content="".join(content_parts),
+            tool_calls=tool_calls,
+            usage=usage,
+        )
 
     @staticmethod
     def _merge_orphan_fragments(

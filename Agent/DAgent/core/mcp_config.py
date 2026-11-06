@@ -76,6 +76,7 @@ class MCPConfig:
 def load_mcp_config(
     project_root: str | Path | None = None,
     filename: str = MCP_CONFIG_FILENAME,
+    default_timeout: float = DEFAULT_TIMEOUT,
 ) -> MCPConfig:
     """Load ``<project_root>/.mcp.json``.
 
@@ -145,7 +146,9 @@ def load_mcp_config(
             warnings.append(f"MCP Server 名称重复：{name}，已跳过后一个")
             continue
         try:
-            server, server_warnings = _parse_server(name, raw_server, root)
+            server, server_warnings = _parse_server(
+                name, raw_server, root, default_timeout
+            )
         except ValueError as error:
             warnings.append(f"MCP Server {name!r} 配置无效，已跳过：{error}")
             continue
@@ -159,7 +162,10 @@ def load_mcp_config(
 
 
 def _parse_server(
-    name: str, raw: Any, root: Path
+    name: str,
+    raw: Any,
+    root: Path,
+    default_timeout: float = DEFAULT_TIMEOUT,
 ) -> tuple[MCPServerConfig | None, list[str]]:
     if not isinstance(raw, dict):
         raise ValueError("服务器配置必须是 JSON 对象")
@@ -171,7 +177,7 @@ def _parse_server(
     transport_value = raw.get("type", raw.get("transport", ""))
     transport = _normalize_transport(transport_value, raw)
 
-    timeout = _parse_timeout(raw.get("timeout"), warnings)
+    timeout = _parse_timeout(raw.get("timeout"), warnings, default_timeout)
 
     if transport == STDIO:
         command = _expand(str(raw.get("command", "")).strip(), warnings)
@@ -264,20 +270,25 @@ def _normalize_transport(value: Any, raw: Mapping[str, Any]) -> str:
     )
 
 
-def _parse_timeout(value: Any, warnings: list[str]) -> float:
+def _parse_timeout(
+    value: Any,
+    warnings: list[str],
+    default_timeout: float = DEFAULT_TIMEOUT,
+) -> float:
+    default = float(default_timeout) if default_timeout > 0 else DEFAULT_TIMEOUT
     if value is None or value == "":
-        return DEFAULT_TIMEOUT
+        return default
     try:
         timeout = float(value)
     except (TypeError, ValueError):
-        warnings.append(f"timeout 不是数字，已使用默认值 {DEFAULT_TIMEOUT:g}")
-        return DEFAULT_TIMEOUT
+        warnings.append(f"timeout 不是数字，已使用默认值 {default:g}")
+        return default
     if not MIN_TIMEOUT <= timeout <= MAX_TIMEOUT:
         warnings.append(
             f"timeout 超出范围 {MIN_TIMEOUT:g}-{MAX_TIMEOUT:g}，"
-            f"已使用默认值 {DEFAULT_TIMEOUT:g}"
+            f"已使用默认值 {default:g}"
         )
-        return DEFAULT_TIMEOUT
+        return default
     return timeout
 
 

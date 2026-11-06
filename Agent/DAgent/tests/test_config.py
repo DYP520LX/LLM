@@ -29,6 +29,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(settings.timeout, 120.0)
         self.assertEqual(settings.max_tool_rounds, 10)
         self.assertEqual(settings.search_api_key, "")
+        self.assertIsNone(settings.context_window)
 
     def test_parses_explicit_options(self) -> None:
         with tempfile.TemporaryDirectory(prefix="dagent_config_") as temp:
@@ -98,6 +99,37 @@ class ConfigTests(unittest.TestCase):
                 os.chdir(previous)
 
         self.assertEqual(settings.model, "mock")
+
+    def test_parses_optional_context_window(self) -> None:
+        for raw, expected in (
+            ("128000", 128000),
+            ("128k", 128000),
+            ("1m", 1000000),
+        ):
+            with tempfile.TemporaryDirectory(prefix="dagent_config_") as temp:
+                path = Path(temp) / "config.ini"
+                path.write_text(
+                    "[llm]\n"
+                    "base_url = http://127.0.0.1:9999\n"
+                    "model = mock\n"
+                    f"context_window = {raw}\n",
+                    encoding="utf-8",
+                )
+                settings = load_settings(path)
+            self.assertEqual(settings.context_window, expected)
+
+    def test_invalid_context_window_raises_config_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="dagent_config_") as temp:
+            path = Path(temp) / "config.ini"
+            path.write_text(
+                "[llm]\n"
+                "base_url = http://127.0.0.1:9999\n"
+                "model = mock\n"
+                "context_window = zero\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(ConfigError):
+                load_settings(path)
 
     def test_missing_file_raises_config_error(self) -> None:
         with self.assertRaises(ConfigError):

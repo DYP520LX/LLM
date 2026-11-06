@@ -19,7 +19,7 @@ class RunCliTests(unittest.TestCase):
     def test_registry_contains_runcli(self) -> None:
         registry = build_registry()
         self.assertIn("Runcli", registry.names())
-        self.assertEqual(len(registry), 15)
+        self.assertEqual(len(registry), 16)
 
     def test_runs_program_with_argument_list_and_shell_false(self) -> None:
         with mock.patch.object(

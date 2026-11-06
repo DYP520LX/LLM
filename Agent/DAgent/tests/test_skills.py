@@ -358,7 +358,7 @@ class SkillToolRegistrationTests(unittest.TestCase):
 
             self.assertIn("loadskill", registry.names())
             self.assertIn("createskill", registry.names())
-            self.assertEqual(len(registry), 17)
+            self.assertEqual(len(registry), 18)
 
             result = registry.execute(
                 ToolCall(

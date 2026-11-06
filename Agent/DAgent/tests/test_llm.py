@@ -4,12 +4,25 @@ import json
 import unittest
 
 from core.config import Settings
-from core.llm import LLMTextDelta, LLMTurnComplete, OpenAICompatibleClient
+from core.llm import (
+    LLMTextDelta,
+    LLMTurnComplete,
+    OpenAICompatibleClient,
+    TokenUsage,
+)
 from core.types import ToolCall
 
 
 def _sse(payload: dict) -> bytes:
     return ("data: " + json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+class FakeResponse:
+    def __init__(self, payload: dict) -> None:
+        self._payload = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._payload
 
 
 def _tool_delta(tool_calls: list[dict]) -> bytes:
@@ -139,6 +152,55 @@ class StreamParsingTests(unittest.TestCase):
 
         self.assertEqual(len(complete.tool_calls), 1)
         self.assertEqual(complete.tool_calls[0].name, "")
+
+    def test_streamed_usage_is_parsed_from_final_chunk(self) -> None:
+        response = [
+            _sse({"choices": [{"delta": {"content": "你好"}}]}),
+            _sse(
+                {
+                    "choices": [],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 3,
+                        "total_tokens": 13,
+                    },
+                }
+            ),
+            b"data: [DONE]\n",
+        ]
+
+        complete = list(_client()._consume_stream(response))[-1]
+
+        self.assertEqual(
+            complete.usage,
+            TokenUsage(prompt_tokens=10, completion_tokens=3, total_tokens=13),
+        )
+
+
+class FullResponseParsingTests(unittest.TestCase):
+    def test_full_response_usage_is_parsed(self) -> None:
+        response = FakeResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "完整回答",
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                },
+            }
+        )
+
+        complete = list(_client()._consume_full_response(response))[-1]
+
+        self.assertEqual(complete.content, "完整回答")
+        self.assertEqual(complete.usage.total_tokens, 25)
 
 
 if __name__ == "__main__":

@@ -48,10 +48,24 @@ class TurnFailed:
     message: str
 
 
+@dataclass(frozen=True)
+class ContextUsageUpdated:
+    """The latest context-window usage after an LLM request."""
+
+    used_tokens: int
+    window_tokens: int
+    percent: float
+    needs_compaction: bool
+    is_default_window: bool = False
+    estimated: bool = False
+    warning_ratio: float = 0.60
+
+
 AgentEvent = Union[
     AssistantText,
     ToolCallStarted,
     ToolCallFinished,
     TurnCompleted,
     TurnFailed,
+    ContextUsageUpdated,
 ]

@@ -8,10 +8,55 @@ Header {
     color: $text;
 }
 
+#context-meter {
+    height: 1;
+    padding: 0 2;
+    background: $panel;
+    color: $text;
+    text-style: bold;
+}
+
+#context-meter.warning {
+    color: $warning;
+}
+
+#context-meter.critical {
+    color: $error;
+}
+
+#main-area {
+    height: 1fr;
+}
+
 #transcript {
+    width: 1fr;
     height: 1fr;
     padding: 1 2;
     background: $surface;
+}
+
+#mcp-sidebar {
+    width: 36;
+    height: 1fr;
+    padding: 0 1;
+    background: $panel;
+    border-left: solid $primary;
+}
+
+#sidebar-title {
+    height: 1;
+    padding: 0 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#sidebar-scroll {
+    height: 1fr;
+    padding: 0 1;
+}
+
+#mcp-panel {
+    width: 100%;
 }
 
 .message {
@@ -51,11 +96,40 @@ Header {
     color: $text-muted;
 }
 
+.warning {
+    color: $warning;
+    text-style: bold;
+    padding-left: 3;
+}
+
 #status {
     height: 1;
     padding: 0 2;
     background: $panel;
     color: $text-muted;
+}
+
+#slash-palette {
+    height: auto;
+    max-height: 14;
+    padding: 0 2 1 2;
+    background: $panel;
+    border-top: solid $primary;
+}
+
+#slash-title {
+    height: 1;
+    color: $accent;
+    text-style: bold;
+}
+
+#slash-items {
+    height: auto;
+    padding: 0 1;
+}
+
+.hidden {
+    display: none;
 }
 
 #composer {
@@ -75,4 +149,124 @@ Header {
 
 Footer {
     background: $panel;
+}
+
+CompactPreviewScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#compact-dialog {
+    width: 92%;
+    height: 86%;
+    padding: 1 2;
+    background: $surface;
+    border: thick $primary;
+}
+
+#compact-title {
+    height: 1;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#compact-columns {
+    height: 1fr;
+}
+
+.compact-column {
+    width: 1fr;
+    height: 1fr;
+    margin-right: 1;
+    padding: 0 1;
+    border: solid $panel;
+}
+
+.compact-heading {
+    height: 1;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.compact-scroll {
+    height: 1fr;
+}
+
+#compact-close {
+    width: 12;
+    margin-top: 1;
+}
+
+SessionListScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#session-dialog {
+    width: 82%;
+    height: 72%;
+    padding: 1 2;
+    background: $surface;
+    border: thick $primary;
+}
+
+#session-title {
+    height: 1;
+    text-style: bold;
+}
+
+#session-hint {
+    height: 1;
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#session-list {
+    height: 1fr;
+    border: solid $panel;
+}
+
+#session-list ListItem {
+    padding: 0 1;
+}
+
+#session-actions {
+    height: auto;
+    align: right middle;
+    margin-top: 1;
+}
+
+#session-cancel {
+    width: 12;
+}
+
+#setup-host {
+    height: 1fr;
+    align: center middle;
+    background: $surface;
+}
+
+#setup-dialog {
+    width: 72;
+    height: auto;
+    padding: 2 3;
+    background: $panel;
+    border: thick $primary;
+}
+
+#setup-title {
+    height: 1;
+    color: $accent;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#setup-text {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#setup-exit {
+    width: 12;
 }

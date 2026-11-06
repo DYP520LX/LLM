@@ -73,13 +73,42 @@ class MCPToolBinding:
     tool: str
 
 
+@dataclass(frozen=True)
+class MCPServerStatus:
+    """Connection state and tools for one configured MCP Server."""
+
+    name: str
+    transport: str
+    connected: bool
+    tools: tuple[str, ...] = ()
+    error: str = ""
+
+    @property
+    def tool_names(self) -> tuple[str, ...]:
+        """Alias used by the TUI sidebar."""
+
+        return self.tools
+
+
 class MCPClientManager:
     """Owns the background event loop and all MCP client sessions."""
 
-    def __init__(self, servers: tuple[MCPServerConfig, ...] | list[MCPServerConfig]):
+    def __init__(
+        self,
+        servers: tuple[MCPServerConfig, ...] | list[MCPServerConfig],
+        *,
+        connect_grace_seconds: float = CONNECT_GRACE_SECONDS,
+        call_grace_seconds: float = CALL_GRACE_SECONDS,
+        shutdown_grace_seconds: float = SHUTDOWN_GRACE_SECONDS,
+        max_result_chars: int = MAX_RESULT_CHARS,
+    ):
         self._servers: dict[str, MCPServerConfig] = {
             server.name: server for server in servers
         }
+        self._connect_grace_seconds = max(0.0, connect_grace_seconds)
+        self._call_grace_seconds = max(0.0, call_grace_seconds)
+        self._shutdown_grace_seconds = max(0.0, shutdown_grace_seconds)
+        self._max_result_chars = max(1, max_result_chars)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._serve_futures: dict[str, Any] = {}
@@ -141,7 +170,7 @@ class MCPClientManager:
         # slowest configured timeout plus a small handshake grace period.
         deadline = time.monotonic() + max(
             server.timeout for server in self._servers.values()
-        ) + CONNECT_GRACE_SECONDS
+        ) + self._connect_grace_seconds
 
         for name, server in self._servers.items():
             event = ready_events[name]
@@ -185,7 +214,7 @@ class MCPClientManager:
             return
 
         if self._thread is not None:
-            self._thread.join(timeout=SHUTDOWN_GRACE_SECONDS + 2.0)
+            self._thread.join(timeout=self._shutdown_grace_seconds + 2.0)
             if self._thread.is_alive():
                 try:
                     loop.call_soon_threadsafe(loop.stop)
@@ -237,7 +266,7 @@ class MCPClientManager:
                 try:
                     await asyncio.wait_for(
                         asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=SHUTDOWN_GRACE_SECONDS,
+                        timeout=self._shutdown_grace_seconds,
                     )
                 except Exception:
                     pass
@@ -347,6 +376,31 @@ class MCPClientManager:
             return tuple(self._bindings.values())
 
     @property
+    def server_statuses(self) -> tuple[MCPServerStatus, ...]:
+        """Snapshot of every configured server for status UIs."""
+
+        with self._lock:
+            servers = list(self._servers.values())
+            sessions = set(self._sessions)
+            errors = dict(self._errors)
+            infos = list(self._tool_infos)
+
+        tools_by_server: dict[str, list[str]] = {}
+        for info in infos:
+            tools_by_server.setdefault(info.server, []).append(info.name)
+
+        return tuple(
+            MCPServerStatus(
+                name=server.name,
+                transport=server.transport,
+                connected=server.name in sessions,
+                tools=tuple(tools_by_server.get(server.name, ())),
+                error=errors.get(server.name, ""),
+            )
+            for server in servers
+        )
+
+    @property
     def startup_warnings(self) -> tuple[str, ...]:
         with self._lock:
             errors = dict(self._errors)
@@ -432,7 +486,9 @@ class MCPClientManager:
                 ok=False,
             )
 
-        timeout = (server.timeout if server else 30.0) + CALL_GRACE_SECONDS
+        timeout = (
+            server.timeout if server else 30.0
+        ) + self._call_grace_seconds
         try:
             call_result = future.result(timeout=timeout)
         except TimeoutError:
@@ -455,7 +511,13 @@ class MCPClientManager:
                 ok=False,
             )
 
-        return _format_call_result(result_name, server_name, tool_name, call_result)
+        return _format_call_result(
+            result_name,
+            server_name,
+            tool_name,
+            call_result,
+            self._max_result_chars,
+        )
 
 
 # -- registration ----------------------------------------------------------
@@ -586,6 +648,7 @@ def _format_call_result(
     server_name: str,
     tool_name: str,
     result: Any,
+    max_chars: int = MAX_RESULT_CHARS,
 ) -> ToolResult:
     parts: list[str] = []
     for block in getattr(result, "content", None) or []:
@@ -612,7 +675,7 @@ def _format_call_result(
     )
     if not content:
         content = "（MCP 工具没有返回内容）"
-    content = _truncate(content)
+    content = _truncate(content, max_chars)
     if is_error:
         content = (
             f"MCP 工具 {server_name}.{tool_name} 返回错误：\n{content}"
@@ -693,13 +756,14 @@ def _render_resource(resource: Any) -> str:
     return str(resource)
 
 
-def _truncate(text: str) -> str:
-    if len(text) <= MAX_RESULT_CHARS:
+def _truncate(text: str, max_chars: int = MAX_RESULT_CHARS) -> str:
+    limit = max(1, max_chars)
+    if len(text) <= limit:
         return text
     return (
-        text[:MAX_RESULT_CHARS].rstrip()
+        text[:limit].rstrip()
         + f"\n\n[结果已截断：原始 {len(text)} 字符，"
-        f"仅保留前 {MAX_RESULT_CHARS} 字符]"
+        f"仅保留前 {limit} 字符]"
     )
 
 
@@ -720,6 +784,7 @@ def _format_exception(error: BaseException) -> str:
 __all__ = [
     "MCPToolBinding",
     "MCPToolInfo",
+    "MCPServerStatus",
     "MCPClientManager",
     "register_mcp_tools",
 ]

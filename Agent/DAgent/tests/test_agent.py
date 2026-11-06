@@ -54,7 +54,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(llm.calls), 2)
 
         first_messages, first_tools = llm.calls[0]
-        self.assertEqual(len(first_tools), 15)
+        self.assertEqual(len(first_tools), 16)
         self.assertEqual(first_messages[-1]["role"], "user")
 
         second_messages, _ = llm.calls[1]
