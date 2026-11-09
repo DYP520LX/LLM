@@ -323,8 +323,10 @@ class Agent:
             yield TurnFailed("正在压缩上下文，暂时不能执行其他任务。")
             return
         if self._needs_compaction:
+            ratio = self._context_warning_ratio * 100
             yield TurnFailed(
-                "上下文使用量已达到模型窗口的 60%，普通提示词已暂停。"
+                f"上下文使用量已达到模型窗口的 {ratio:.0f}%，"
+                "普通提示词已暂停。"
                 "请先执行 /compact 压缩上下文。"
             )
             return

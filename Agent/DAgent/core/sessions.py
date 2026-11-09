@@ -66,10 +66,18 @@ class SessionStore:
         """Create a new, empty session directory and return its metadata."""
 
         with self._lock:
-            self.root.mkdir(parents=True, exist_ok=True)
+            try:
+                self.root.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise SessionError(f"创建会话目录失败：{self.root}（{error}）") from error
             session_id = self._new_session_id()
             directory = self._directory(session_id)
-            directory.mkdir(parents=True, exist_ok=False)
+            try:
+                directory.mkdir(parents=True, exist_ok=False)
+            except OSError as error:
+                raise SessionError(
+                    f"创建会话 {session_id} 失败：{error}"
+                ) from error
             now = _now()
             info = SessionInfo(
                 id=session_id,
@@ -98,7 +106,12 @@ class SessionStore:
 
         with self._lock:
             directory = self._directory(session_id)
-            directory.mkdir(parents=True, exist_ok=True)
+            try:
+                directory.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise SessionError(
+                    f"创建会话 {session_id} 目录失败：{error}"
+                ) from error
             previous = self._read_meta(session_id)
             now = _now()
             snapshot = _json_safe_messages(messages)
@@ -169,7 +182,11 @@ class SessionStore:
                     continue
                 if not _SESSION_ID_RE.fullmatch(directory.name):
                     continue
-                info = self._read_meta(directory.name)
+                try:
+                    info = self._read_meta(directory.name)
+                except SessionError:
+                    # A damaged session must not hide the other sessions.
+                    continue
                 if info is not None:
                     sessions.append(info)
         sessions.sort(key=lambda item: item.updated_at, reverse=True)
@@ -236,12 +253,16 @@ class SessionStore:
             raise SessionError(f"读取会话 {session_id} 元数据失败：{error}") from error
         if not isinstance(data, dict):
             raise SessionError(f"会话 {session_id} 元数据格式无效")
+        try:
+            message_count = int(data.get("message_count") or 0)
+        except (TypeError, ValueError):
+            message_count = 0
         return SessionInfo(
             id=session_id,
             title=str(data.get("title") or DEFAULT_TITLE),
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
-            message_count=int(data.get("message_count") or 0),
+            message_count=message_count,
             preview=str(data.get("preview") or ""),
             path=directory,
         )
@@ -262,9 +283,9 @@ class SessionStore:
 
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + ".tmp")
         try:
+            path.parent.mkdir(parents=True, exist_ok=True)
             temporary.write_text(
                 json.dumps(data, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
@@ -304,7 +325,9 @@ class SessionStore:
 
 
 def _now() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+    # Microseconds make ``/resume`` ordering deterministic even when several
+    # sessions are created or saved inside the same second.
+    return datetime.now().astimezone().isoformat(timespec="microseconds")
 
 
 def _derive_title(messages: Iterable[ChatMessage]) -> str:

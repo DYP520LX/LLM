@@ -193,6 +193,9 @@ class DAgentApp(App[None]):
         self._sidebar.styles.width = self.settings.tui_sidebar_width
 
         self._bootstrap_session()
+        # Keep AGENTS.md useful even when an embedding UI did not enable
+        # session persistence; with a store, _bootstrap_session already did it.
+        self._ensure_agents_context()
 
         stream_state = "开" if self.settings.stream else "关"
         session_line = ""
@@ -383,7 +386,7 @@ class DAgentApp(App[None]):
     async def _command_new(self) -> None:
         if not await self._ensure_not_busy():
             return
-        await self._save_current_session(silent=True)
+        self._save_current_session(silent=True)
         old_id = self._session_info.id if self._session_info else ""
         if self._session_store is not None:
             try:
@@ -451,7 +454,7 @@ class DAgentApp(App[None]):
         if self._session_store is None:
             return
         self._set_status(f"正在恢复会话 {session.id}…")
-        await self._save_current_session(silent=True)
+        self._save_current_session(silent=True)
         try:
             messages = self._session_store.load(session.id)
         except SessionError as error:
@@ -782,6 +785,12 @@ class DAgentApp(App[None]):
                 f"{type(error).__name__}: {error}",
             )
         else:
+            if self._closing:
+                # The app may have exited while the connection was in flight;
+                # Agent.close() already ran, so release the new manager here.
+                if result.manager is not None:
+                    result.manager.close()
+                return
             self._post(self._on_mcp_loaded, result)
 
     def _on_mcp_loaded(self, result: MCPLoadResult) -> None:
@@ -1068,9 +1077,16 @@ class DAgentApp(App[None]):
         if usage is None:
             usage = getattr(self.agent, "context_usage", None)
         if not isinstance(usage, ContextUsage):
+            window_tokens = getattr(self.agent, "context_window", 128_000)
+            try:
+                window_tokens = int(window_tokens)
+            except (TypeError, ValueError):
+                window_tokens = 128_000
+            if window_tokens <= 0:
+                window_tokens = 128_000
             usage = ContextUsage(
                 used_tokens=0,
-                window_tokens=128_000,
+                window_tokens=window_tokens,
                 is_default_window=True,
                 estimated=True,
                 warning_ratio=self._warning_ratio(),
@@ -1098,12 +1114,16 @@ class DAgentApp(App[None]):
         )
 
     def _warning_ratio(self) -> float:
-        value = getattr(self.agent, "context_warning_ratio", 0.60)
+        value = getattr(
+            self.agent,
+            "context_warning_ratio",
+            self.settings.context_warning_ratio,
+        )
         try:
             ratio = float(value)
         except (TypeError, ValueError):
-            return 0.60
-        return ratio if 0 < ratio <= 1 else 0.60
+            ratio = self.settings.context_warning_ratio
+        return ratio if 0 < ratio <= 1 else self.settings.context_warning_ratio
 
     def _warning_percent(self) -> float:
         return self._warning_ratio() * 100.0

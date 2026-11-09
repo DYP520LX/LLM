@@ -4,7 +4,9 @@ import subprocess
 import unittest
 from unittest import mock
 
+from core.config import Settings
 from core.tools import build_registry, web_tools
+from core.types import ToolCall
 
 ARTICLE_HTML = """<html><head><title>表格测试</title></head><body>
 <nav><a href="/">首页导航</a> <a href="/about">关于我们</a></nav>
@@ -45,6 +47,40 @@ class FetchWebTests(unittest.TestCase):
             item for item in registry.schemas() if item["function"]["name"] == "fetch_web"
         )
         self.assertEqual(schema["function"]["parameters"]["required"], ["url"])
+
+    def test_registry_uses_configured_web_timeout_and_limits(self) -> None:
+        settings = Settings(
+            base_url="http://127.0.0.1:9999/v1",
+            api_key="mock",
+            model="mock",
+            web_timeout=1.5,
+            web_default_max_chars=500,
+            web_max_chars=600,
+        )
+        registry = build_registry(settings=settings)
+        with mock.patch.object(
+            web_tools,
+            "_download",
+            return_value=(b"hello", 200, "text/plain", "https://example.com/"),
+        ) as download:
+            result = registry.execute(
+                ToolCall(
+                    "call_1",
+                    "fetch_web",
+                    '{"url": "https://example.com/", "max_chars": 500}',
+                )
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(download.call_args.args[1], 1.5)
+        self.assertIn("hello", result.content)
+        schema = next(
+            item for item in registry.schemas() if item["function"]["name"] == "fetch_web"
+        )
+        self.assertEqual(
+            schema["function"]["parameters"]["properties"]["max_chars"]["maximum"],
+            600,
+        )
 
     def test_fetch_web_returns_clean_markdown(self) -> None:
         with mock.patch.object(

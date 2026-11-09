@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..config import Settings
 from ..skills import SkillCatalog
 from . import (
     calendar_tools,
@@ -22,6 +23,7 @@ def build_registry(
     search_api_key: str = "",
     skill_catalog: SkillCatalog | None = None,
     context_dir: str | Path | None = None,
+    settings: Settings | None = None,
 ) -> ToolRegistry:
     """Create a registry containing all built-in tools.
 
@@ -30,14 +32,41 @@ def build_registry(
     error to the model. ``skill_catalog`` enables the ``loadskill`` and
     ``createskill`` tools; when it is ``None`` (as in tests that only exercise
     built-in tools) no skill tool is registered. ``context_dir`` points at the
-    archive directory used by ``recallContext``.
+    archive directory used by ``recallContext``. ``settings`` supplies optional
+    per-tool limits and timeouts; omitted values fall back to each tool's
+    documented defaults.
     """
 
+    if settings is not None and not search_api_key:
+        search_api_key = settings.search_api_key
+
     registry = ToolRegistry()
-    for module in (time_tools, calendar_tools, file_tools, web_tools, cli_tools):
+    for module in (time_tools, calendar_tools, file_tools):
         for tool in module.tools():
             registry.register(tool)
-    for tool in search_tools.tools(search_api_key):
+
+    if settings is None:
+        web_tools_list = web_tools.tools()
+        cli_tools_list = cli_tools.tools()
+        search_tools_list = search_tools.tools(search_api_key)
+    else:
+        web_tools_list = web_tools.tools(
+            timeout=settings.web_timeout,
+            default_max_chars=settings.web_default_max_chars,
+            max_chars=settings.web_max_chars,
+        )
+        cli_tools_list = cli_tools.tools(
+            timeout=settings.cli_timeout,
+            max_stream_chars=settings.cli_max_stream_chars,
+        )
+        search_tools_list = search_tools.tools(
+            search_api_key,
+            timeout=settings.search_timeout,
+            default_top_k=settings.search_default_top_k,
+            max_top_k=settings.search_max_top_k,
+            max_snippet_chars=settings.search_max_snippet_chars,
+        )
+    for tool in (*web_tools_list, *cli_tools_list, *search_tools_list):
         registry.register(tool)
     if context_dir is None:
         project_root = (

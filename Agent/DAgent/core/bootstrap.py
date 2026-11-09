@@ -85,7 +85,12 @@ def create_agent(
     catalog = SkillCatalog.discover(project_root)
     root = catalog.project_root
     context_dir = _resolve_project_path(root, settings.context_archive_dir)
-    registry = build_registry(settings.search_api_key, catalog, context_dir)
+    registry = build_registry(
+        settings.search_api_key,
+        catalog,
+        context_dir,
+        settings,
+    )
 
     prompt = build_system_prompt(catalog, settings.system_prompt)
     agent = Agent(
@@ -143,11 +148,22 @@ def load_mcp_into_agent(
         call_grace_seconds=settings.mcp_call_grace_seconds,
         shutdown_grace_seconds=settings.mcp_shutdown_grace_seconds,
         max_result_chars=settings.mcp_max_result_chars,
+        default_timeout=settings.mcp_default_timeout,
     )
-    manager.start()
+    try:
+        manager.start()
+    except BaseException:
+        manager.close()
+        raise
     warnings.extend(manager.startup_warnings)
-    bindings = register_mcp_tools(agent.registry, manager)
-    statuses = manager.server_statuses
+    try:
+        bindings = register_mcp_tools(agent.registry, manager)
+        statuses = manager.server_statuses
+    except BaseException:
+        # Never leak the background event loop or stdio children when tool
+        # registration fails halfway through.
+        manager.close()
+        raise
     if bindings or any(status.connected for status in statuses):
         agent.add_closer(manager.close)
     else:

@@ -101,6 +101,7 @@ class MCPClientManager:
         call_grace_seconds: float = CALL_GRACE_SECONDS,
         shutdown_grace_seconds: float = SHUTDOWN_GRACE_SECONDS,
         max_result_chars: int = MAX_RESULT_CHARS,
+        default_timeout: float = 30.0,
     ):
         self._servers: dict[str, MCPServerConfig] = {
             server.name: server for server in servers
@@ -109,6 +110,7 @@ class MCPClientManager:
         self._call_grace_seconds = max(0.0, call_grace_seconds)
         self._shutdown_grace_seconds = max(0.0, shutdown_grace_seconds)
         self._max_result_chars = max(1, max_result_chars)
+        self._default_timeout = max(0.1, default_timeout)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._serve_futures: dict[str, Any] = {}
@@ -487,7 +489,7 @@ class MCPClientManager:
             )
 
         timeout = (
-            server.timeout if server else 30.0
+            server.timeout if server else self._default_timeout
         ) + self._call_grace_seconds
         try:
             call_result = future.result(timeout=timeout)

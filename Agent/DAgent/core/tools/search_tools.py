@@ -140,7 +140,11 @@ def _request_search(
     return references
 
 
-def _format_results(question: str, references: list[dict]) -> str:
+def _format_results(
+    question: str,
+    references: list[dict],
+    max_snippet_chars: int = MAX_SNIPPET_CHARS,
+) -> str:
     if not references:
         return f"搜索：{question}\n没有找到相关搜索结果。"
 
@@ -152,8 +156,8 @@ def _format_results(question: str, references: list[dict]) -> str:
         url = _clean_text(reference.get("url"))
         summary = _clean_text(reference.get("content") or reference.get("snippet"))
         published = _clean_text(reference.get("date"))
-        if len(summary) > MAX_SNIPPET_CHARS:
-            summary = summary[:MAX_SNIPPET_CHARS].rstrip() + "..."
+        if len(summary) > max_snippet_chars:
+            summary = summary[:max_snippet_chars].rstrip() + "..."
 
         lines.append(f"{index}. {title}")
         if url:
@@ -172,6 +176,10 @@ def search_web(
     api_key: str,
     top_k: int = DEFAULT_TOP_K,
     timeout: float = DEFAULT_TIMEOUT,
+    *,
+    default_top_k: int = DEFAULT_TOP_K,
+    max_top_k: int = MAX_TOP_K,
+    max_snippet_chars: int = MAX_SNIPPET_CHARS,
 ) -> str:
     """Search the web and return summaries with source titles and URLs."""
 
@@ -183,18 +191,35 @@ def search_web(
         try:
             limit = int(top_k)
         except (TypeError, ValueError):
-            limit = DEFAULT_TOP_K
-        limit = min(max(limit, 1), MAX_TOP_K)
+            limit = default_top_k
+        limit = min(max(limit, 1), max_top_k)
 
         references = _request_search(question, key, limit, timeout)
-        return _format_results(question, references)
+        return _format_results(question, references, max_snippet_chars)
     except SearchToolError as error:
         return f"错误：{error}"
 
 
-def tools(api_key: str = "") -> list[Tool]:
-    def handler(query: str, top_k: int = DEFAULT_TOP_K) -> str:
-        return search_web(query, api_key, top_k=top_k)
+def tools(
+    api_key: str = "",
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    default_top_k: int = DEFAULT_TOP_K,
+    max_top_k: int = MAX_TOP_K,
+    max_snippet_chars: int = MAX_SNIPPET_CHARS,
+) -> list[Tool]:
+    top_k_limit = max(int(max_top_k), 1)
+
+    def handler(query: str, top_k: int = default_top_k) -> str:
+        return search_web(
+            query,
+            api_key,
+            top_k=top_k,
+            timeout=timeout,
+            default_top_k=default_top_k,
+            max_top_k=top_k_limit,
+            max_snippet_chars=max_snippet_chars,
+        )
 
     return [
         Tool(
@@ -214,11 +239,11 @@ def tools(api_key: str = "") -> list[Tool]:
                     "top_k": {
                         "type": "integer",
                         "description": (
-                            f"返回的参考结果数量，默认 {DEFAULT_TOP_K}，"
-                            f"范围 1-{MAX_TOP_K}"
+                            f"返回的参考结果数量，默认 {default_top_k}，"
+                            f"范围 1-{top_k_limit}"
                         ),
                         "minimum": 1,
-                        "maximum": MAX_TOP_K,
+                        "maximum": top_k_limit,
                     },
                 },
                 "required": ["query"],

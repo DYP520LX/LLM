@@ -37,6 +37,15 @@ DEFAULT_MCP_MAX_RESULT_CHARS = 30_000
 DEFAULT_TUI_SIDEBAR_WIDTH = 36
 DEFAULT_TUI_SESSION_LIST_LIMIT = 50
 DEFAULT_TUI_MESSAGE_PREVIEW_CHARS = 1_200
+DEFAULT_CLI_TIMEOUT = 30.0
+DEFAULT_CLI_MAX_STREAM_CHARS = 6_000
+DEFAULT_WEB_TIMEOUT = 20.0
+DEFAULT_WEB_MAX_CHARS = 12_000
+DEFAULT_WEB_MAX_CHARS_LIMIT = 50_000
+DEFAULT_SEARCH_TIMEOUT = 20.0
+DEFAULT_SEARCH_TOP_K = 5
+DEFAULT_SEARCH_MAX_TOP_K = 10
+DEFAULT_SEARCH_MAX_SNIPPET_CHARS = 400
 
 DEFAULT_CONFIG_TEXT = f"""\
 # DAgent 项目配置文件
@@ -95,6 +104,24 @@ session_list_limit = {DEFAULT_TUI_SESSION_LIST_LIMIT}
 # TUI 中恢复历史消息时的预览字符数
 message_preview_chars = {DEFAULT_TUI_MESSAGE_PREVIEW_CHARS}
 
+[tools]
+# Runcli 单次执行超时（秒）
+cli_timeout = {DEFAULT_CLI_TIMEOUT:g}
+# Runcli 的 stdout/stderr 各自最多返回的字符数
+cli_max_stream_chars = {DEFAULT_CLI_MAX_STREAM_CHARS}
+# fetch_web 请求超时（秒）
+web_timeout = {DEFAULT_WEB_TIMEOUT:g}
+# fetch_web 默认返回正文长度，以及模型可请求的上限
+web_default_max_chars = {DEFAULT_WEB_MAX_CHARS}
+web_max_chars = {DEFAULT_WEB_MAX_CHARS_LIMIT}
+# searchweb 请求超时（秒）
+search_timeout = {DEFAULT_SEARCH_TIMEOUT:g}
+# searchweb 默认返回条数，以及模型可请求的上限
+search_default_top_k = {DEFAULT_SEARCH_TOP_K}
+search_max_top_k = {DEFAULT_SEARCH_MAX_TOP_K}
+# 每条搜索结果的摘要最大字符数
+search_max_snippet_chars = {DEFAULT_SEARCH_MAX_SNIPPET_CHARS}
+
 [search]
 # 百度千帆百度搜索 API Key，用于 searchweb 工具
 baidu_qianfan_api_key =
@@ -140,6 +167,15 @@ class Settings:
     tui_sidebar_width: int = DEFAULT_TUI_SIDEBAR_WIDTH
     tui_session_list_limit: int = DEFAULT_TUI_SESSION_LIST_LIMIT
     tui_message_preview_chars: int = DEFAULT_TUI_MESSAGE_PREVIEW_CHARS
+    cli_timeout: float = DEFAULT_CLI_TIMEOUT
+    cli_max_stream_chars: int = DEFAULT_CLI_MAX_STREAM_CHARS
+    web_timeout: float = DEFAULT_WEB_TIMEOUT
+    web_default_max_chars: int = DEFAULT_WEB_MAX_CHARS
+    web_max_chars: int = DEFAULT_WEB_MAX_CHARS_LIMIT
+    search_timeout: float = DEFAULT_SEARCH_TIMEOUT
+    search_default_top_k: int = DEFAULT_SEARCH_TOP_K
+    search_max_top_k: int = DEFAULT_SEARCH_MAX_TOP_K
+    search_max_snippet_chars: int = DEFAULT_SEARCH_MAX_SNIPPET_CHARS
 
 
 def load_settings(path: str | Path | None = None) -> Settings:
@@ -254,6 +290,51 @@ def load_settings(path: str | Path | None = None) -> Settings:
             "message_preview_chars",
             DEFAULT_TUI_MESSAGE_PREVIEW_CHARS,
         )
+        cli_timeout = _get_float(
+            parser, "tools", "cli_timeout", DEFAULT_CLI_TIMEOUT
+        )
+        cli_max_stream_chars = _get_int(
+            parser,
+            "tools",
+            "cli_max_stream_chars",
+            DEFAULT_CLI_MAX_STREAM_CHARS,
+        )
+        web_timeout = _get_float(
+            parser, "tools", "web_timeout", DEFAULT_WEB_TIMEOUT
+        )
+        web_default_max_chars = _get_int(
+            parser,
+            "tools",
+            "web_default_max_chars",
+            DEFAULT_WEB_MAX_CHARS,
+        )
+        web_max_chars = _get_int(
+            parser,
+            "tools",
+            "web_max_chars",
+            DEFAULT_WEB_MAX_CHARS_LIMIT,
+        )
+        search_timeout = _get_float(
+            parser, "tools", "search_timeout", DEFAULT_SEARCH_TIMEOUT
+        )
+        search_default_top_k = _get_int(
+            parser,
+            "tools",
+            "search_default_top_k",
+            DEFAULT_SEARCH_TOP_K,
+        )
+        search_max_top_k = _get_int(
+            parser,
+            "tools",
+            "search_max_top_k",
+            DEFAULT_SEARCH_MAX_TOP_K,
+        )
+        search_max_snippet_chars = _get_int(
+            parser,
+            "tools",
+            "search_max_snippet_chars",
+            DEFAULT_SEARCH_MAX_SNIPPET_CHARS,
+        )
 
         search_api_key = ""
         if parser.has_section("search"):
@@ -301,6 +382,28 @@ def load_settings(path: str | Path | None = None) -> Settings:
         raise ConfigError("[tui] session_list_limit 必须大于 0")
     if tui_message_preview_chars <= 0:
         raise ConfigError("[tui] message_preview_chars 必须大于 0")
+    if cli_timeout <= 0:
+        raise ConfigError("[tools] cli_timeout 必须大于 0")
+    if cli_max_stream_chars <= 0:
+        raise ConfigError("[tools] cli_max_stream_chars 必须大于 0")
+    if web_timeout <= 0:
+        raise ConfigError("[tools] web_timeout 必须大于 0")
+    if web_default_max_chars <= 0 or web_max_chars <= 0:
+        raise ConfigError("[tools] web 字符数限制必须大于 0")
+    if web_default_max_chars > web_max_chars:
+        raise ConfigError(
+            "[tools] web_default_max_chars 不能大于 web_max_chars"
+        )
+    if search_timeout <= 0:
+        raise ConfigError("[tools] search_timeout 必须大于 0")
+    if search_default_top_k <= 0 or search_max_top_k <= 0:
+        raise ConfigError("[tools] search 结果数限制必须大于 0")
+    if search_default_top_k > search_max_top_k:
+        raise ConfigError(
+            "[tools] search_default_top_k 不能大于 search_max_top_k"
+        )
+    if search_max_snippet_chars <= 0:
+        raise ConfigError("[tools] search_max_snippet_chars 必须大于 0")
 
     return Settings(
         base_url=base_url,
@@ -326,6 +429,15 @@ def load_settings(path: str | Path | None = None) -> Settings:
         tui_sidebar_width=tui_sidebar_width,
         tui_session_list_limit=tui_session_list_limit,
         tui_message_preview_chars=tui_message_preview_chars,
+        cli_timeout=cli_timeout,
+        cli_max_stream_chars=cli_max_stream_chars,
+        web_timeout=web_timeout,
+        web_default_max_chars=web_default_max_chars,
+        web_max_chars=web_max_chars,
+        search_timeout=search_timeout,
+        search_default_top_k=search_default_top_k,
+        search_max_top_k=search_max_top_k,
+        search_max_snippet_chars=search_max_snippet_chars,
     )
 
 

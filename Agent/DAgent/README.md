@@ -18,6 +18,8 @@ DAgent/
 │   ├── skills.py            # Agent Skills 发现与按需加载
 │   ├── mcp_config.py        # 读取当前项目的 .mcp.json
 │   ├── mcp_client.py        # MCP 连接、list_tools 与工具调用转发
+│   ├── project_context.py   # AGENTS.md 读取、标记与一次性注入
+│   ├── sessions.py          # 会话目录、快照与 events.jsonl 事件日志
 │   ├── types.py             # 消息、ToolCall、ToolResult 等类型
 │   └── tools/
 │       ├── registry.py      # 工具注册与安全执行
@@ -30,7 +32,8 @@ DAgent/
 │       ├── context_tools.py # recallContext：检索历史上下文归档
 │       └── cli_tools.py     # Runcli：执行本地命令行程序
 ├── tui/                     # Textual 表现层
-│   ├── app.py               # 聊天界面、流式渲染、工具状态展示
+│   ├── app.py               # 聊天界面、斜杠命令、MCP 边栏、会话恢复
+│   ├── screens.py           # 历史会话列表与首次配置对话框
 │   └── styles.tcss          # 界面样式
 ├── tests/                   # 使用标准库 unittest
 ├── main.py                  # TUI 组合根 / 启动入口
@@ -49,6 +52,8 @@ DAgent/
 - 工具以 `Tool` 描述（名称、描述、JSON Schema、处理函数）注册到 `ToolRegistry`。
 - 新增本地工具只需在 `core/tools` 中注册，不需要修改界面。
 - MCP 工具在启动时发现后同样注册为 `Tool`，与本地工具共用同一条 Function Calling 执行链。
+- TUI 启动后先在后台线程连接 MCP，再动态刷新右侧边栏；不会阻塞首屏。
+- `AGENTS.md` 在会话首次加载时注入一次，并随会话持久化；后续轮次直接复用同一条消息，保持 Provider 缓存稳定。
 
 ### 事件流
 
@@ -109,11 +114,17 @@ python main.py --config D:\path\to\config.ini
 TUI 操作：
 
 - `Enter`：发送
+- `/`：打开斜杠命令补全面板；继续输入可过滤，`↑/↓` 选择，`Enter` 执行，`Esc` 关闭
+- `/new`：自动保存当前会话并新建会话
+- `/resume`：打开历史会话列表；`↑/↓` 选择，`Enter` 恢复，`Esc` 取消
+- `/save`：立即保存当前会话
+- `/quit`：保存并退出（也可 `Ctrl+Q`）
 - `/compact`：手动压缩当前会话上下文
+- `/clear`：清空当前会话（保留会话编号）
+- `/help`、`/status`、`/mcp`、`/agents`：查看命令、运行状态、MCP 状态与 AGENTS.md 注入状态
 - `Ctrl+L`：清空会话
-- `Ctrl+Q`：退出
 
-界面顶部会持续显示 `上下文：已用 k / 窗口 k · 已占用百分比`。无法从配置获得模型窗口时默认按 `128k` 计算，并标注「默认」。
+界面顶部会持续显示 `上下文：已用 k / 窗口 k · 已占用百分比`。无法从配置获得模型窗口时默认按 `128k` 计算，并标注「默认」。右侧边栏显示每个 MCP Server 的连接状态、传输方式和可用工具名称。
 
 ## 配置
 
@@ -125,6 +136,8 @@ Copy-Item D:\学习\wd\LLM\Agent\DAgent\config.example.ini .\config.ini
 
 `python main.py` 默认读取 `当前工作目录/config.ini`，不会读取 DAgent 源码目录中的 `config.ini`。
 
+首次在某个目录启动时，如果 `config.ini` 不存在，DAgent 会自动生成一份**完整的 mock 配置**并弹出提示对话框。修改 `[llm]` 后重新启动即可；已有配置文件不会被覆盖。
+
 ```ini
 [llm]
 base_url = https://text.pollinations.ai/openai
@@ -135,14 +148,59 @@ timeout = 120
 max_tool_rounds = 10
 # context_window = 128000
 
+[agent]
+system_prompt =
+agents_file = AGENTS.md
+
+[context]
+warning_ratio = 0.60
+compaction_target_tokens = 5000
+archive_dir = .agents/context
+
+[sessions]
+dir = .agents/sessions
+
+[mcp]
+config_file = .mcp.json
+default_timeout = 30
+connect_grace_seconds = 5
+call_grace_seconds = 5
+shutdown_grace_seconds = 8
+max_result_chars = 30000
+
+[tui]
+sidebar_width = 36
+session_list_limit = 50
+message_preview_chars = 1200
+
+[tools]
+cli_timeout = 30
+cli_max_stream_chars = 6000
+web_timeout = 20
+web_default_max_chars = 12000
+web_max_chars = 50000
+search_timeout = 20
+search_default_top_k = 5
+search_max_top_k = 10
+search_max_snippet_chars = 400
+
 [search]
-baidu_qianfan_api_key = bce-v3/ALTAK-...
+baidu_qianfan_api_key =
 ```
+
+所有配置项都有内置默认值，只有需要覆盖默认行为时才必须填写。`config.example.ini` 包含全部字段和注释。
 
 - `stream = true`：逐段显示模型输出，并请求 Provider 在最后一个流式块中返回 Token Usage
 - `stream = false`：等完整回复后一次性显示
 - `max_tool_rounds`：单轮对话中允许的最大工具调用轮数
 - `context_window`：可选，模型上下文窗口大小。支持 `128000`、`128k`、`1m` 等写法；不填时按 `128000` 处理，并在 TUI 中标注「默认」
+- `agents_file`：项目说明文件名，默认 `AGENTS.md`
+- `warning_ratio`：上下文达到该比例后暂停普通提示词，并要求 `/compact`
+- `compaction_target_tokens`：压缩摘要的目标 Token 数
+- `[sessions] dir`：会话持久化目录
+- `[mcp]`：MCP 配置文件、超时、握手宽限时间与工具结果截断长度
+- `[tui]`：边栏宽度、`/resume` 列表数量与历史消息预览长度
+- `[tools]`：`Runcli` 超时与输出截断、`fetch_web` 超时与正文长度、`searchweb` 超时与结果数量/摘要长度
 - `baidu_qianfan_api_key`：百度千帆百度搜索 API Key，供 `searchweb` 工具使用；留空时工具会向 LLM 返回明确的配置错误
 
 ## MCP Client
@@ -201,19 +259,65 @@ stdio 示例：
 }
 ```
 
+### 异步加载与状态边栏
+
+TUI 启动时只组装本地工具，随后在后台 worker 中读取 `.mcp.json` 并连接 MCP Server。首屏不会被网络连接阻塞；连接完成后，右侧边栏会自动刷新，显示：
+
+- 每个 Server 的名称、传输方式和连接状态（已连接 / 等待 / 失败）
+- 每个 Server 实际提供的原始工具名称
+- 本地工具数量与 MCP 工具总数
+- 连接错误或安装提示
+
+`/mcp` 可以手动刷新状态，`/status` 会输出同样的摘要。MCP 工具加载完成后，Agent 会重新计算上下文占用。
+
 ### 工具发现、命名与调用
 
-- 启动时按 MCP Python SDK 标准接口建立连接：`initialize()`，再调用 `list_tools()`（自动处理分页），读取每个工具的名称、描述和 `inputSchema`。
+- 连接时按 MCP Python SDK 标准接口建立连接：`initialize()`，再调用 `list_tools()`（自动处理分页），读取每个工具的名称、描述和 `inputSchema`。
 - 发现到的工具注册进现有的 `ToolRegistry`，因此 `LLM` 看到的 Schema、Agent 的执行路径、TUI 的工具状态展示都与本地工具完全一致。
 - **命名映射**：内部维护 `暴露给 LLM 的名称 -> (MCP Server, 原始工具名)` 的 binding 表。工具名合法且不冲突时直接使用原名；与本地工具重名、多个 Server 之间重名或包含非法字符时，暴露为 `<server>__<tool>`；超过 64 字符会截断并附加哈希，保证符合 Function Calling 的名称限制。
 - **调用转发**：LLM 发起调用后，Agent 仍走 `ToolRegistry.execute()`；MCP handler 根据 binding 找到 Server，使用 `ClientSession.call_tool(原始工具名, 参数)` 转发，不需要修改 Agent 循环或界面。
 - **结果处理**：拼接所有文本内容；`structuredContent` 以格式化 JSON 追加；图片、音频和二进制资源返回可读摘要；服务器返回 `isError=true` 或调用抛出异常时，结果标记为失败（`ToolResult.ok=False`）并带上错误详情，LLM 可以据此调整参数重试。
-- **错误隔离**：单个 Server 配置错误、连接超时、初始化失败或运行中断开，只影响该 Server。错误会写入 `Agent.startup_notes`，TUI 启动时显示为“启动警告”，`main.py` 同时输出到 stderr；其他 MCP Server 以及 `Runcli`、`fetch_web`、`loadskill` 等本地工具继续正常工作。
+- **错误隔离**：单个 Server 配置错误、连接超时、初始化失败或运行中断开，只影响该 Server。错误会写入 `MCPLoadResult.warnings` 和边栏状态，TUI 以警告消息显示；其他 MCP Server 以及 `Runcli`、`fetch_web`、`loadskill` 等本地工具继续正常工作。
 - MCP 会话运行在独立的后台事件循环线程中并保持长连接；`Agent.close()`（TUI 退出时自动调用）会关闭会话并回收 stdio 子进程。
 
 ### 依赖
 
 `requirements.txt` 已包含 `mcp>=1.10,<2`。若环境未安装 MCP SDK，DAgent 仍能启动，MCP 工具会返回明确的安装提示。
+
+## 会话持久化与 AGENTS.md
+
+### 会话目录
+
+每个会话保存在 `[sessions] dir`（默认 `.agents/sessions/`）下的独立目录中：
+
+```text
+.agents/sessions/20261106-153000/
+├── meta.json       # 标题、创建/更新时间、消息数、预览
+├── messages.json   # 当前完整聊天历史（恢复时使用）
+└── events.jsonl    # 追加写入的事件日志
+```
+
+- `/new` 会先保存当前会话，再创建新会话并重新注入 `AGENTS.md`。
+- `/resume` 按更新时间倒序列出历史会话；`↑/↓` 选择，`Enter` 恢复，`Esc` 取消。
+- `/save` 立即写入快照；每轮回答完成、压缩完成、切换会话和退出时也会自动保存。
+- `events.jsonl` 记录 `session_created`、`snapshot`、`agents_md` 等事件；如果 `messages.json` 丢失，可以从最后一个 `snapshot` 事件恢复。
+- 会话编号按秒生成；同一秒内创建多个会话时自动追加 `-01`、`-02` 后缀。
+
+### AGENTS.md 一次注入，全程复用
+
+如果项目根目录存在 `[agent] agents_file` 指定的文件（默认 `AGENTS.md`），DAgent 会在会话首次加载时读取它，并作为一条 `system` 消息插入到开头系统提示之后：
+
+```text
+【项目说明 AGENTS.md】
+来源：<项目路径>/AGENTS.md
+
+<文件正文>
+```
+
+- 注入后会立即保存到会话快照和 `events.jsonl` 的 `agents_md` 事件中。
+- 后续轮次不会重复注入；恢复包含该标记的会话时直接复用，保持消息前缀稳定，避免破坏 Provider 缓存。
+- `/agents` 可以查看文件是否存在、当前会话是否已注入。
+- 新建会话、清空会话或恢复一个不含该标记的旧会话时，会重新注入一次。
 
 ## 上下文压缩与历史检索
 
@@ -222,7 +326,7 @@ stdio 示例：
 - 每次 LLM 返回后，`Agent` 都会检查当前请求的上下文用量，包含 System Prompt、用户消息、对话历史、工具调用消息、工具返回结果以及工具定义 Schema。
 - 优先使用 Provider 返回的 `usage.prompt_tokens / completion_tokens / total_tokens`；流式请求会带上 `stream_options.include_usage`。Provider 没有返回 Usage 时，使用本地估算：中文约 1 Token/字，英文约 4 字符/Token。
 - 每次更新都会产生 `ContextUsageUpdated` 事件，TUI 顶部据此刷新上下文条。
-- 用量达到窗口的 **60%** 时，TUI 显示警告并把提示词输入框切换为 `/compact` 提示；`Agent.run_turn()` 也会拒绝新的普通提示词，直到压缩成功。
+- 用量达到 `[context] warning_ratio`（默认 **60%**）时，TUI 显示警告并把提示词输入框切换为 `/compact` 提示；`Agent.run_turn()` 也会拒绝新的普通提示词，直到压缩成功。
 - 上下文窗口来自 `[llm] context_window`；未配置时默认 `128k`，TUI 显示「默认」。
 
 ### `/compact` 手动压缩
@@ -241,7 +345,7 @@ stdio 示例：
 5. TUI 会弹出浮动双栏面板：左侧为压缩前原文，右侧为压缩后摘要，两栏均可独立滚动，点击「关闭」按钮返回会话。
 6. 压缩成功后解除输入限制；如果归档、LLM 请求或摘要生成失败，原有上下文保持不变，TUI 报告错误，用户可以再次输入 `/compact` 重试。
 
-压缩目标约为 5,000 Tokens；实际摘要长度由模型根据压缩 Prompt 控制。
+压缩目标由 `[context] compaction_target_tokens` 控制（默认约 5,000 Tokens）；实际摘要长度由模型根据压缩 Prompt 控制。
 
 ### `recallContext` 工具
 
@@ -360,7 +464,7 @@ description: 根据周报模板整理本周工作记录并生成周报。
 - 系统提示还会说明 MCP 工具与本地工具用法相同；MCP 工具描述末尾会标注来源 Server，便于模型区分同名工具。
 - 模型返回空回复时自动追加一次纠正提示并重试；仍然为空则结束本轮并报告失败，避免界面无提示。
 - 流式解析会合并被网关拆成“无名称片段”的工具调用参数，并清理 `<|channel|>` 之类的通道标记，避免合法工具被误判为未知工具。
-- 上下文达到 60% 后，普通提示词会被阻止；`/compact` 是唯一可继续执行的操作。压缩期间 `Agent.compact()` 不接收工具 Schema，也不会执行任何工具调用。
+- 上下文达到 `[context] warning_ratio`（默认 60%）后，普通提示词会被阻止；`/compact` 是唯一可继续执行的操作。压缩期间 `Agent.compact()` 不接收工具 Schema，也不会执行任何工具调用。
 - 压缩失败不会修改内存中的历史；压缩成功后才替换历史并保留 System Prompt 与工具注册表。
 
 ## 测试

@@ -5,6 +5,7 @@ import sys
 import unittest
 from unittest import mock
 
+from core.config import Settings
 from core.tools import build_registry, cli_tools
 from core.types import ToolCall
 
@@ -153,6 +154,27 @@ class RunCliTests(unittest.TestCase):
 
     def test_decode_output_falls_back_to_gbk(self) -> None:
         self.assertEqual(cli_tools._decode_output("中文".encode("gbk")), "中文")
+
+    def test_registry_uses_configured_cli_limits(self) -> None:
+        settings = Settings(
+            base_url="http://127.0.0.1:9999/v1",
+            api_key="mock",
+            model="mock",
+            cli_timeout=1.25,
+            cli_max_stream_chars=5,
+        )
+        registry = build_registry(settings=settings)
+        with mock.patch.object(
+            cli_tools.subprocess, "run", return_value=_completed(b"abcdefghij")
+        ) as run:
+            result = registry.execute(
+                ToolCall("call_1", "Runcli", '{"command": "tool"}')
+            )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(run.call_args.kwargs["timeout"], 1.25)
+        self.assertIn("仅显示前 5 字符", result.content)
+        self.assertNotIn("abcdef", result.content)
 
     def test_registry_executes_runcli(self) -> None:
         registry = build_registry()

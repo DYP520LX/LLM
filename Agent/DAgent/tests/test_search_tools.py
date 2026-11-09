@@ -6,6 +6,7 @@ import unittest
 from io import BytesIO
 from unittest import mock
 
+from core.config import Settings
 from core.tools import build_registry, search_tools
 from core.types import ToolCall
 
@@ -58,6 +59,36 @@ class SearchToolTests(unittest.TestCase):
         registry = build_registry("test-key")
         self.assertIn("searchweb", registry.names())
         self.assertEqual(len(registry), 16)
+
+    def test_registry_uses_configured_search_defaults(self) -> None:
+        settings = Settings(
+            base_url="http://127.0.0.1:9999/v1",
+            api_key="mock",
+            model="mock",
+            search_api_key="test-key",
+            search_timeout=1.5,
+            search_default_top_k=2,
+            search_max_top_k=3,
+            search_max_snippet_chars=5,
+        )
+        registry = build_registry(settings=settings)
+        with mock.patch.object(
+            search_tools,
+            "_request_search",
+            return_value=[],
+        ) as request:
+            result = registry.execute(_tool_call("测试"))
+
+        self.assertTrue(result.ok)
+        self.assertEqual(request.call_args.args[2], 2)
+        self.assertEqual(request.call_args.args[3], 1.5)
+        schema = next(
+            item for item in registry.schemas() if item["function"]["name"] == "searchweb"
+        )
+        self.assertEqual(
+            schema["function"]["parameters"]["properties"]["top_k"]["maximum"],
+            3,
+        )
 
     def test_search_formats_summaries_titles_and_urls(self) -> None:
         with mock.patch.object(

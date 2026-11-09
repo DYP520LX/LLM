@@ -46,18 +46,26 @@ def _normalize_args(args: object) -> list[str]:
     return [str(item) for item in args]
 
 
-def _truncate(text: str) -> tuple[str, bool]:
-    if len(text) <= MAX_STREAM_CHARS:
+def _truncate(
+    text: str,
+    max_chars: int = MAX_STREAM_CHARS,
+) -> tuple[str, bool]:
+    if len(text) <= max_chars:
         return text, False
-    return text[:MAX_STREAM_CHARS], True
+    return text[:max_chars], True
 
 
-def _format_stream(name: str, text: str, lines: list[str]) -> None:
-    shown, truncated = _truncate(text)
+def _format_stream(
+    name: str,
+    text: str,
+    lines: list[str],
+    max_chars: int = MAX_STREAM_CHARS,
+) -> None:
+    shown, truncated = _truncate(text, max_chars)
     if truncated:
         lines.append(
             f"--- {name}（已截断：原始 {len(text)} 字符，"
-            f"仅显示前 {MAX_STREAM_CHARS} 字符） ---"
+            f"仅显示前 {max_chars} 字符） ---"
         )
     else:
         lines.append(f"--- {name} ---")
@@ -70,13 +78,14 @@ def _format_result(
     stdout: str,
     stderr: str,
     status: str | None = None,
+    max_stream_chars: int = MAX_STREAM_CHARS,
 ) -> str:
     lines = [f"命令：{command_text}", f"退出码：{exit_code}"]
     if status:
         lines.append(f"状态：{status}")
     lines.append("")
-    _format_stream("stdout", stdout, lines)
-    _format_stream("stderr", stderr, lines)
+    _format_stream("stdout", stdout, lines, max_stream_chars)
+    _format_stream("stderr", stderr, lines, max_stream_chars)
     return "\n".join(lines)
 
 
@@ -96,7 +105,13 @@ def _failure_hint(exit_code: int, stderr: str) -> str | None:
     )
 
 
-def run_cli(command: str, args: list[str] | None = None) -> str:
+def run_cli(
+    command: str,
+    args: list[str] | None = None,
+    *,
+    timeout: float = TIMEOUT_SECONDS,
+    max_stream_chars: int = MAX_STREAM_CHARS,
+) -> str:
     """Execute ``command`` with ``args`` and return stdout, stderr and exit code."""
 
     program = str(command or "").strip()
@@ -117,7 +132,7 @@ def run_cli(command: str, args: list[str] | None = None) -> str:
             shell=False,
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
             check=False,
         )
     except subprocess.TimeoutExpired as error:
@@ -128,7 +143,8 @@ def run_cli(command: str, args: list[str] | None = None) -> str:
             "无（进程被终止）",
             stdout,
             stderr,
-            status=f"执行超时（超过 {TIMEOUT_SECONDS:g} 秒），进程已被终止",
+            status=f"执行超时（超过 {timeout:g} 秒），进程已被终止",
+            max_stream_chars=max_stream_chars,
         )
     except FileNotFoundError:
         return (
@@ -148,6 +164,7 @@ def run_cli(command: str, args: list[str] | None = None) -> str:
         str(completed.returncode),
         stdout,
         stderr,
+        max_stream_chars=max_stream_chars,
     )
     hint = _failure_hint(completed.returncode, stderr)
     if hint:
@@ -155,7 +172,18 @@ def run_cli(command: str, args: list[str] | None = None) -> str:
     return output
 
 
-def tools() -> list[Tool]:
+def tools(
+    timeout: float = TIMEOUT_SECONDS,
+    max_stream_chars: int = MAX_STREAM_CHARS,
+) -> list[Tool]:
+    def handler(command: str, args: list[str] | None = None) -> str:
+        return run_cli(
+            command,
+            args,
+            timeout=timeout,
+            max_stream_chars=max_stream_chars,
+        )
+
     return [
         Tool(
             name="Runcli",
@@ -185,6 +213,6 @@ def tools() -> list[Tool]:
                 },
                 "required": ["command"],
             },
-            handler=run_cli,
+            handler=handler,
         )
     ]

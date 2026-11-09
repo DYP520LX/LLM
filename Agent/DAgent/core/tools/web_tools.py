@@ -306,15 +306,22 @@ def fetch_web(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
         return f"错误：{error}"
 
 
-def _fetch_web(url: str, max_chars: int) -> str:
+def _fetch_web(
+    url: str,
+    max_chars: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+    default_max_chars: int = DEFAULT_MAX_CHARS,
+    max_chars_limit: int = MAX_CHARS,
+) -> str:
     target = _normalize_url(url)
     try:
         limit = int(max_chars)
     except (TypeError, ValueError):
-        limit = DEFAULT_MAX_CHARS
-    limit = min(max(limit, MIN_CHARS), MAX_CHARS)
+        limit = default_max_chars
+    limit = min(max(limit, MIN_CHARS), max_chars_limit)
 
-    body, status, content_type, effective_url = _download(target, DEFAULT_TIMEOUT)
+    body, status, content_type, effective_url = _download(target, timeout)
 
     if status and status >= 400:
         raise WebToolError(f"网页返回 HTTP {status}：{effective_url}")
@@ -364,12 +371,33 @@ def _fetch_web(url: str, max_chars: int) -> str:
         lines.append("")
         lines.append(
             f"[内容已截断：仅保留前 {limit} 个字符，"
-            f"如需更多内容可调大 max_chars（上限 {MAX_CHARS}）]"
+            f"如需更多内容可调大 max_chars（上限 {max_chars_limit}）]"
         )
     return "\n".join(lines)
 
 
-def tools() -> list[Tool]:
+def tools(
+    timeout: float = DEFAULT_TIMEOUT,
+    default_max_chars: int = DEFAULT_MAX_CHARS,
+    max_chars: int = MAX_CHARS,
+) -> list[Tool]:
+    max_chars_limit = max(int(max_chars), MIN_CHARS)
+
+    def handler(
+        url: str,
+        max_chars: int = default_max_chars,
+    ) -> str:
+        try:
+            return _fetch_web(
+                url,
+                max_chars,
+                timeout=timeout,
+                default_max_chars=default_max_chars,
+                max_chars_limit=max_chars_limit,
+            )
+        except WebToolError as error:
+            return f"错误：{error}"
+
     return [
         Tool(
             name="fetch_web",
@@ -392,15 +420,15 @@ def tools() -> list[Tool]:
                     "max_chars": {
                         "type": "integer",
                         "description": (
-                            "正文最大字符数，默认 12000，范围 "
-                            f"{MIN_CHARS}-{MAX_CHARS}；超出部分会被截断"
+                            f"正文最大字符数，默认 {default_max_chars}，范围 "
+                            f"{MIN_CHARS}-{max_chars_limit}；超出部分会被截断"
                         ),
                         "minimum": MIN_CHARS,
-                        "maximum": MAX_CHARS,
+                        "maximum": max_chars_limit,
                     },
                 },
                 "required": ["url"],
             },
-            handler=fetch_web,
+            handler=handler,
         )
     ]
